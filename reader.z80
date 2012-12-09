@@ -1,0 +1,303 @@
+;.nolist
+;#include "ti83plus.inc"
+;#define    ProgStart    $9D95
+;.list
+;.org    ProgStart - 2
+;.db    t2ByteTok, tAsmCmp
+
+;    jp Main
+
+#include "clrfunc.z80"
+
+;Main:
+;    set TextWrite, (IY + SGrFlags) ;on graph
+;    res TextEraseBelow, (IY + TextFlags) ;don't erase pixels when displaying small text
+;    set TextInverse, (IY + TextFlags)
+
+;    bcall(_ClrLCDFull)
+    
+;    ld hl, text2
+;    call Reader
+     
+    ;clean up
+;    res TextInverse, (IY + TextFlags)
+;    bcall(_GrBufClr)
+;    res TextWrite, (IY + SGrFlags)
+;    res TextEraseBelow, (IY + TextFlags)
+    
+;    bcall(_Disp)
+    
+;    ret
+    
+Reader:
+    ;read text starting at hl, a screen at a time
+    ;display first screen
+    ;inc hl ;first byte is $FF
+    jp OneScreen    
+    
+ReaderLoop:
+    ex de, hl
+    bcall(_GetCSC) 
+    ex de, hl ;GetCSC destroys AF and HL, but not DE
+    
+    cp skRight
+    jr z, Next10
+    
+    cp skLeft
+    jr z, Prev10
+    
+    cp skDown
+    jr z, NextScreen
+    
+    cp skEnter
+    jr z, NextScreen
+    
+    cp skUp
+    jr z, PrevScreen
+    
+    cp skZoom
+    jr z, ChangeScreenColor
+    
+    cp skClear
+    jr z, UserQuit
+    
+    cp skDel
+    jr z, ReaderFinished
+    
+    jr ReaderLoop
+    
+ChangeScreenColor:
+    ld a, 8 ;2**TextInverse
+    xor (IY + TextFlags)
+    ld (IY + TextFlags), a
+    jr ReaderLoop
+        
+    
+NextScreen:
+    inc hl
+    
+    ld de, $7FFF
+    sbc hl, de
+    add hl, de
+    jr nc, ReaderNextPage
+    
+    ld a, (hl)
+    cp $FF
+    jr z, ReaderFinished
+    
+    jr OneScreen
+    
+PrevScreen:
+    ld b, 2
+PrevScreenLoop:
+    dec hl
+    ld a, (hl)
+    cp $FF
+    jr z, PrevScreenTestingPage
+    or a
+    jr nz, PrevScreenLoop
+    
+    djnz PrevScreenLoop
+    
+PrevScreenTestingPage:    
+    ;push hl
+    ;bcall(_DispHL)
+    ;bcall(_Newline)
+    ;pop hl
+
+    ld de, $4000
+    sbc hl, de
+    add hl, de
+    jr c, ReaderPrevPage
+    
+    jr NextScreen
+
+Next10:    
+    ld b, 9
+Next10Loop:
+    inc hl
+    ld a, (hl)
+    cp $FF
+    jr z, PrevScreen
+    or a ;cp 0
+    jr nz, Next10Loop
+    
+    djnz Next10Loop
+    
+    jr NextScreen    
+    
+Prev10:    
+    ld b, 11
+Prev10Loop:
+    dec hl
+    ld a, (hl)
+    cp $FF
+    jr z, PrevScreenTestingPage
+    or a ;cp 0
+    jr nz, Prev10Loop
+    
+    djnz Prev10Loop
+    
+    jr PrevScreenTestingPage
+    
+    
+ReaderFinished:
+    xor a ;zero flag to show we're done
+    ret ;maybe some other stuff later   
+    
+ReaderNextPage:    
+    or 1 ;reset zero
+    ld a, 1 ;add page
+    ld hl, $4000
+    ret
+    
+ReaderPrevPage:
+    or 1 ;reset zero
+    ld a, -1 ;subtract page
+    ld hl, $7FC0
+    ret
+    
+UserQuit:
+    xor a ;zero flag to show we're done
+    ;bcall(_DispHL)
+    ret ;should probably store some state here    
+    
+OneScreen:
+    ;show one screen
+    push hl
+    call CleanGraph
+    ;bcall(_DispHL)
+    ;call WaitForEnter
+    pop hl
+    
+    ld de, $0101
+    ld (PenCol), de      ; PenCol comes before PenRow
+    
+    ld b, 0 
+    
+OneScreenLoop:
+    ld a, (hl)
+    or a
+    jr z, ExitLoop
+    
+    inc hl
+    
+    ;push de
+    ;ld de, $7FFF
+    ;sbc hl, de
+    ;add hl, de
+    ;pop de
+    
+    ;jr nc, ReaderNextPage
+
+    
+    cp '\n'
+    jr z, Newline
+    
+    cp ' '
+    jr nz, NotSpace
+    
+    ;bcall(_VPutMap)
+    
+    ld d, h
+    ld e, l
+    ld a, (PenCol)
+    ld b, a
+    ld a, 6 ;4 spaces
+    
+    
+    
+NotSpace:  
+    push hl 
+    push de
+    bcall(_VPutMap)
+    pop de
+    pop hl
+    
+    jr nc, OneScreenLoop
+    
+    ;text doesn't fit!
+    dec hl
+    
+    ;see if we have a space stored for this row
+    xor a
+    cp b
+    jr z, Newline ;no we don't 
+    
+    
+    ;yes we do
+    
+    ;clear the area
+    push de
+    ld h, b
+    dec h
+    ld a, (PenRow)
+    ld l, a
+    ld a, 96
+    sub b
+    ld d, a
+    ld e, 6
+    call CleanBlock
+    pop de
+    
+    
+    ex de, hl
+
+
+Newline:
+    ;display text so far
+    ;push hl
+    ;bcall(_GrBufCpy)
+    ;pop hl
+   
+    ld b, 0
+    ld de, 0
+    
+    ;dec hl ;back to this character
+    
+    ;increase row by 6 and reset column
+    ld a, 1
+    ld (PenCol), a
+    ld a, (PenRow)
+    add a, 6
+    ld (PenRow), a
+    cp 59
+    jr c, OneScreenLoop
+    
+    ;screen is full
+    ;we're only displaying one screenfull of data, though...
+    ;so i guess we should just get to the end of data, not displaying everything
+    ; =(
+    
+    ld a, (hl)
+    or a
+    jr z, ExitLoop
+    
+FinishDataLoop:
+    inc hl
+    ld a, (hl)
+    or a
+    jr nz, FinishDataLoop
+    
+
+ExitLoop:
+    ;display text so far
+    push hl
+    bcall(_GrBufCpy)
+    pop hl
+    
+    jp ReaderLoop
+    
+WaitForEnter:
+    bcall(_GetCSC)
+    halt
+    cp skEnter
+    jr nz, WaitForEnter
+    
+    ret
+       
+
+    
+
+.end
+.end

@@ -1,0 +1,156 @@
+.nolist
+#include "ti83plus.inc"
+#define    ProgStart    $9D95
+.list
+.org    ProgStart - 2
+.db    t2ByteTok, tAsmCmp
+
+    jp Main_FindApp
+    
+#include "reader.z80"
+
+;call it LEGENDA
+
+Main_FindApp:
+    in a,(6)
+    push af
+    
+    ld hl, Main_varName
+    bcall(_Mov9toOp1)
+    bcall(_ChkFindSym)
+    jr c, Main_notfound      ;carry flag is set if the VAT entry is not found
+    ex de,hl           ;put data pointer into hl 
+    xor a 
+    cp  b              ;see if b is 0, and the data is in the ram
+    jr z, Main_unarchived      ;if so, jump to unarchived 
+    
+    
+;    ex de, hl
+    ;ld hl, text_archived
+    ;bcall(_PutS)
+    ;bcall(_Newline)
+;    ex de, hl
+    
+
+    ;ld a, b
+    ;out (6), a
+
+    ld a,b
+    out (6),a
+;    inc a
+;    out (7), a
+
+; push hl
+; ld d, 0
+; ld e, 9
+; add hl, de
+; ld a, (hl)
+; ld l, a
+; ld h, 0
+; bcall(_DispHL)
+; pop hl 
+    
+    
+ 
+Main_unarchived:
+    
+    ld d, 0
+    ld e, 9
+    add hl, de ;skip over some data bytes
+
+    ld a, (hl) ;get length of name
+    ld e, a
+    inc e
+    add hl, de ;skip over name
+
+    inc hl
+    inc hl ;skip over file length
+    
+    inc hl ;skip over $FF
+
+
+    set TextWrite, (IY + SGrFlags) ;on graph
+    res TextEraseBelow, (IY + TextFlags) ;don't erase pixels when displaying small text
+    res TextInverse, (IY + TextFlags)
+    
+    push hl
+    push bc
+    bcall(_ClrLCDFull)
+    pop bc
+    pop hl
+    
+Main_ReaderLoop:    
+    push bc
+    call Reader
+    pop bc
+    
+    jr z, Main_Finished ;reader resets z if it's done
+    
+    ;a holds what to page increment (+-1), b holds current page #
+    add a, b 
+    out (6), a
+    ld b, a
+;    inc a
+;    out (7), a
+    
+    jr Main_ReaderLoop
+    
+    
+Main_Finished:    
+    ;clean up
+    res TextInverse, (IY + TextFlags)
+    bcall(_GrBufClr)
+    res TextWrite, (IY + SGrFlags)
+    res TextEraseBelow, (IY + TextFlags)
+    
+    bcall(_Disp)
+
+   ; push hl
+    ;ld a, (hl)
+    ;ld h, 0
+    ;ld l, a
+    ;push bc
+    ;bcall(_DispHL)
+    ;ld h, 0
+    ;ld l, b
+    ;bcall(_DispHL)
+    ;bcall(_Newline)
+    ;call WaitForEnter
+    ;pop bc
+    ;pop hl
+    ;inc hl
+
+;    djnz Main_unarchived
+        
+    ;ld hl, text_archived
+    ;bcall(_PutS)
+ 
+Main_notfound:    
+    pop af
+    out (6),a   
+
+    ret
+
+    
+FindApp_WaitForEnter:
+    bcall(_GetCSC)
+    halt
+    cp skEnter
+    jr nz, FindApp_WaitForEnter
+    
+    ret    
+    
+Main_varName:
+.db AppVarObj, "Alice",0
+
+text_archived:
+.db "Archived", 0
+
+
+
+
+
+
+
+
+

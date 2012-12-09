@@ -1,0 +1,284 @@
+
+ClearGraph:
+;switch to graph screen and clear it
+    ld     hl, PlotSScreen 
+    ld     de, PlotSScreen+1            ;Start at beginning
+    ld     bc, 64*12-1                  ;64 rows
+    ld     (hl), $00
+    ldir              ;go!!
+    bcall(_GrBufCpy)
+    ret
+
+
+FillGraph:
+;switch to graph screen and fill it
+    ld     hl, PlotSScreen 
+    ld     de, PlotSScreen+1            ;Start at beginning
+    ld     bc, 64*12-1                  ;64 rows
+    ld     (hl), $FF
+    ldir              ;go!!
+    bcall(_GrBufCpy)
+    ret
+    
+    
+CleanGraph:
+    bit TextInverse, (IY + TextFlags)  
+    call z,  ClearGraph
+    call nz, FillGraph
+    ret
+    
+CleanBlock:
+    bit TextInverse, (IY + TextFlags)  
+    call z,  ClearBlock
+    call nz, FillBlock
+    ret 
+    
+ClearBlock:
+;.module ClearBlock 
+;clear a block of pixels starting at (H, L) and width D, height E
+;assumes it won't overflow, so be careful!!!
+
+    xor a
+    cp d
+    ret z ;width  = 0
+    cp e
+    ret z ;height = 0
+    
+    ld a, h
+    push de
+    call GetPixel
+    pop de
+    
+    ld c, $FF
+    
+    inc d
+    
+LeftMaskLoop:
+    sla c
+    rrca
+    dec d
+    jr nz, SkipSettingBit 
+    
+    inc d
+    set 0, c
+SkipSettingBit:
+    jr nc, LeftMaskLoop
+    
+    dec d
+    
+    ;the left mask is now stored in c
+    ld b, $FF
+    
+    xor a
+    cp d
+    jr z, ClearRowLoop ;no more masks
+    
+    ld a, d
+    srl d
+    srl d
+    srl d ;divide by 8
+    
+    and 7 ;get remainder
+    jr z, ClearRowLoop ;0 shifts needed
+    
+    ld b, a  
+    ld a, $FF
+   
+     
+RightMaskLoop:   ;generate b number of 0's
+    or a ;reset carry
+    rra
+    djnz RightMaskLoop
+
+    ld b, a
+    
+ClearRowLoop:
+    ;actually do clearing now
+    ;c has first mask
+    ;d has number of middle masks
+    ;b has last mask
+    ;hl, of course, has address
+    push hl
+    
+    ;first mask
+    ld a, (hl)
+    and c
+    ld (hl), a
+    inc hl
+    
+    ;middle masks    
+    xor a
+    cp d
+    jr z, LastMask
+    
+    push bc ;save b
+    ld b, d
+    
+MiddleMaskLoop:
+    ld (hl), a
+    inc hl
+    djnz MiddleMaskLoop
+    
+    pop bc ;restore b
+LastMask:
+    ld a, (hl)
+    and b
+    ld (hl), a
+    
+    pop hl
+    
+    dec e
+    ret z ;done!
+    
+    push bc
+    ld bc, 12
+    add hl, bc ;next row
+    pop bc
+    
+    
+    jp ClearRowLoop
+ 
+  
+FillBlock:
+;.module FillBlock 
+;fill a block of pixels starting at (H, L) and width D, height E
+;assumes it won't overflow, so be careful!!!
+
+    xor a
+    cp d
+    ret z ;width  = 0
+    cp e
+    ret z ;height = 0
+    
+    ld a, h
+    push de
+    call GetPixel
+    pop de
+    
+    ld c, $FF
+    
+    inc d
+    
+FillLeftMaskLoop:
+    sla c
+    rrca
+    dec d
+    jr nz, FillSkipSettingBit 
+    
+    inc d
+    set 0, c
+FillSkipSettingBit:
+    jr nc, FillLeftMaskLoop
+    
+    dec d
+    
+    ld a, c
+    cpl
+    ld c, a
+    
+    ;the left mask is now stored in c
+    
+    ld b, $00
+    
+    xor a
+    cp d
+    jr z, FillRowLoop ;no more masks
+    
+    ld a, d
+    srl d
+    srl d
+    srl d ;divide by 8
+    
+    and 7 ;get remainder
+    jr z, FillRowLoop ;0 shifts needed
+    
+    ld b, a  
+    ld a, $00
+   
+     
+FillRightMaskLoop:   ;generate b number of 1's
+    scf ;set carry
+    rra
+    djnz FillRightMaskLoop
+
+    ld b, a
+    
+FillRowLoop:
+    ;actually do clearing now
+    ;c has first mask
+    ;d has number of middle masks
+    ;b has last mask
+    ;hl, of course, has address
+    push hl
+    
+    ;first mask
+    ld a, (hl)
+    or c
+    ld (hl), a
+    inc hl
+    
+    ;middle masks    
+    xor a
+    cp d
+    jr z, FillLastMask
+    
+    push bc ;save b
+    ld b, d
+    cpl
+FillMiddleMaskLoop:
+    ld (hl), a
+    inc hl
+    djnz FillMiddleMaskLoop
+    
+    pop bc ;restore b
+FillLastMask:
+    ld a, (hl)
+    or b
+    ld (hl), a
+    
+    pop hl
+    
+    dec e
+    ret z ;done!
+    
+    push bc
+    ld bc, 12
+    add hl, bc ;next row
+    pop bc
+    
+    
+    jr FillRowLoop  
+    
+
+GetPixel: 
+;.module GetPixel    
+;get pixel at (A, L) starting at 0
+;returns address in HL and bitmask in A
+;destroys DE
+    ld h, 0
+    ld d, h
+    ld e, l
+    add hl, hl
+    add hl, de
+    add hl, hl
+    add hl, hl ;multiply by 12 (for y row)
+    
+    ld e, a
+    srl e
+    srl e
+    srl e ;divide by 8 (for x byte)
+    add hl, de
+    
+    ld de, PlotSScreen
+    add hl, de ;now we have the address of byte
+    
+    and 7 ;gonna get bitmask for bit
+    ld b, a ;how many shifts are needed?
+    ld a, %10000000
+    ret z ;don't need to loop if 0 shifts needed
+     
+shiftLoop:   
+    rrca
+    djnz shiftLoop
+    
+    ret
